@@ -1,9 +1,8 @@
 import torch
 import torch.distributed as dist
+import torchvision
 from tqdm import tqdm
 import math
-import numpy as np
-import cv2
 import os
 
 
@@ -61,15 +60,14 @@ def sample_N_images(
             if class_cond:
                 labels_list = [torch.zeros_like(y) for _ in range(num_processes)]
                 dist.all_gather(labels_list, y, group)
-                labels.append(torch.cat(labels_list).detach().cpu().numpy())
+                labels.append(torch.cat(labels_list))
 
             dist.all_gather(samples_list, gen_images, group)
-            samples.append(torch.cat(samples_list).detach().cpu().numpy())
+            samples.append(torch.cat(samples_list))
             num_samples += len(xT) * num_processes
             pbar.update(1)
-    samples = np.concatenate(samples).transpose(0, 2, 3, 1)[:N]
-    samples = (127.5 * (samples + 1)).astype(np.uint8)
-    return (samples, np.concatenate(labels) if class_cond else None)
+    samples = (torch.cat(samples)[:N] + 1) / 2
+    return (samples, torch.cat(labels) if class_cond else None)
 
 def sample_and_save(
     N,
@@ -103,10 +101,10 @@ def sample_and_save(
         class_cond
     )
     if local_rank == 0:
-        cv2.imwrite(
+        torchvision.utils.save_image(
+            sampled_images,
             os.path.join(
                 save_dir,
                 f"{filename_base}.png",
-            ),
-            np.concatenate(sampled_images, axis=1)[:, :, ::-1],
+            )
         )

@@ -54,10 +54,16 @@ def parse_args() -> Namespace:
         help="No training, just sample images (will save them in --save-dir)",
     )
     parser.add_argument(
+        '--distance',
+        action="store_true",
+        default=False,
+        help="Calculate the distance from the generated images to the train set"
+    )
+    parser.add_argument(
         "--num-sampled-images",
         type=int,
-        default=50000,
-        help="Number of images required to sample from the model",
+        default=64,
+        help="Number of images to sample from the model",
     )
     parser.add_argument(
         "--save-freq",

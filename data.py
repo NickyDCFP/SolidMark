@@ -7,6 +7,8 @@ from collections import OrderedDict
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 
+from patterns import Solid
+
 
 def get_metadata(name):
     if name == "mnist":
@@ -17,6 +19,16 @@ def get_metadata(name):
                 "train_images": 60000,
                 "val_images": 10000,
                 "num_channels": 1,
+            }
+        )
+    elif name == "mnist_big":
+        metadata = EasyDict(
+            {
+                "image_size": 32,
+                "num_classes": 10,
+                "train_images": 60000,
+                "val_images": 10000,
+                "num_channels": 3,
             }
         )
     elif name == "mnist_m":
@@ -132,7 +144,7 @@ class oxford_flowers_dataset(Dataset):
 
 
 # TODO: Add datasets imagenette/birds/svhn etc etc.
-def get_dataset(name, data_dir, metadata, use_train):
+def get_dataset(name, data_dir, metadata, use_train, pattern_name, raw=False):
     """
     Return a dataset with the current name. We only support two datasets with
     their fixed image resolutions. One can easily add additional datasets here.
@@ -140,13 +152,37 @@ def get_dataset(name, data_dir, metadata, use_train):
     Note: To avoid learning the distribution of transformed data, don't use heavy
         data augmentation with diffusion models.
     """
+    identity = transforms.Lambda(lambda x: x)
+    if pattern_name == "solid":
+        pattern = Solid()
+    else:
+        pattern =  identity
+
     if name == "mnist":
+        transform_train = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(
+                    metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2)
+                ) if not raw else identity,
+                transforms.ToTensor(),
+                pattern,
+            ]
+        )
+        train_set = datasets.MNIST(
+            root=data_dir,
+            train=use_train,
+            download=True,
+            transform=transform_train,
+        )
+    if name == "mnist_big":
         transform_train = transforms.Compose(
             [
                 transforms.RandomResizedCrop(
                     metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2)
                 ),
                 transforms.ToTensor(),
+                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
+                pattern,
             ]
         )
         train_set = datasets.MNIST(
@@ -160,8 +196,9 @@ def get_dataset(name, data_dir, metadata, use_train):
             [
                 transforms.RandomResizedCrop(
                     metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2)
-                ),
+                ) if not raw else identity,
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -171,8 +208,9 @@ def get_dataset(name, data_dir, metadata, use_train):
     elif name == "cifar10":
         transform_train = transforms.Compose(
             [
-                transforms.RandomHorizontalFlip(),
+                transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         train_set = datasets.CIFAR10(
@@ -185,9 +223,10 @@ def get_dataset(name, data_dir, metadata, use_train):
         transform_train = transforms.Compose(
             [
                 transforms.Resize(74),
-                transforms.RandomCrop(64),
-                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(64) if not raw else identity,
+                transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -199,9 +238,10 @@ def get_dataset(name, data_dir, metadata, use_train):
         transform_train = transforms.Compose(
             [
                 transforms.Resize(64),
-                transforms.CenterCrop(64),
-                transforms.RandomHorizontalFlip(),
+                transforms.CenterCrop(64) if not raw else identity,
+                transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -212,9 +252,10 @@ def get_dataset(name, data_dir, metadata, use_train):
         transform_train = transforms.Compose(
             [
                 transforms.Resize(64),
-                transforms.RandomCrop(64),
-                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(64) if not raw else identity,
+                transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -225,9 +266,10 @@ def get_dataset(name, data_dir, metadata, use_train):
         transform_train = transforms.Compose(
             [
                 transforms.Resize(64),
-                transforms.RandomCrop(64),
-                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(64) if not raw else identity,
+                transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         splits = scipy.io.loadmat(os.path.join(data_dir, "setid.mat"))
@@ -245,6 +287,7 @@ def get_dataset(name, data_dir, metadata, use_train):
             [
                 transforms.Resize((32, 32)),
                 transforms.ToTensor(),
+                pattern,
             ]
         )
         train_set = datasets.ImageFolder(

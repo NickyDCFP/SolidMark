@@ -38,9 +38,7 @@ def patched_carlini_distance(
         patched_distances = torch.max(patched_distances, dim=1).values
         patches_list_x_hat[i] = patches_list_x_hat[i].cpu()
         patches_list_train_set[i] = patches_list_train_set[i].cpu()
-    
-    # patched_distance_tensor: torch.Tensor = torch.stack(patched_distances, dim=1)
-    # max_patched_dist = torch.max(patched_distance_tensor, dim=1).values.to(device)
+
     patched_distances = patched_distances.to(device)
     top_k: topk = torch.topk(-patched_distances, n, sorted=True)
     neighbor_dists: torch.Tensor = -top_k.values
@@ -51,10 +49,8 @@ def patched_carlini_distance(
 
 if __name__ == '__main__':
     from data import get_dataset, get_metadata
-
-    train_set = torch.tensor(get_dataset('cifar10', './dataset/', get_metadata('cifar10'), True).data).permute(0, 3, 1, 2).to(dtype=torch.float32)
-    print(patched_carlini_distance(
-        train_set[0:3],
-        train_set,
-        'cuda'
-    ).size())
+    from torch.utils.data import DataLoader
+    train_set = get_dataset('cifar10', './dataset/', get_metadata('cifar10'), True, 'solid')
+    dataloader = DataLoader(train_set, batch_size=100)
+    ds = torch.cat([batch[0] for batch in dataloader], dim=0)
+    print(ds[1, 0, 12:20, 12:20])

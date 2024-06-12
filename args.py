@@ -22,6 +22,7 @@ def parse_args() -> Namespace:
         default=250,
         help="Number of timesteps in diffusion process",
     )
+    parser.add_argument('--resnet', action="store_true", default=False, help="Train a ResNet to classify") #FIX
     parser.add_argument(
         "--ddim",
         action="store_true",
@@ -31,6 +32,7 @@ def parse_args() -> Namespace:
     # dataset
     parser.add_argument("--dataset", type=str)
     parser.add_argument("--data-dir", type=str, default="./dataset/")
+    parser.add_argument("--pattern", type=str, default="identity")
     parser.add_argument(
         "--finetune",
         action="store_true",
@@ -60,6 +62,12 @@ def parse_args() -> Namespace:
         help="Calculate the distance from the generated images to the train set"
     )
     parser.add_argument(
+        "--inpaint",
+        action="store_true",
+        default=False,
+        help="Use inpainting for the generation"
+    )
+    parser.add_argument(
         "--num-sampled-images",
         type=int,
         default=64,
@@ -71,6 +79,13 @@ def parse_args() -> Namespace:
         default=1,
         help="Frequency of epochs at which model and sample images should be saved"
     )
+    parser.add_argument(
+        "--suffix",
+        type=str,
+        default="",
+        help="Suffix to add after select output files for uniqueness"
+    )
+
 
     # misc
     parser.add_argument("--save-dir", type=str, default="./trained_models/")

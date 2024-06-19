@@ -67,9 +67,9 @@ def main():
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     # Load dataset
-    train_set: Any = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern)
     mask = torch.zeros((3, 32, 32))
     mask[:, 12:20, 12:20] += 1
+    train_set: Any = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, mask=mask)
     if args.resnet and local_rank == 0:
         resnet: ResNet = get_resnet(args.save_dir, train_set, mask, "resnet-base.pt", metadata.num_classes, device)
 

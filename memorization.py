@@ -50,7 +50,20 @@ def patched_carlini_distance(
 if __name__ == '__main__':
     from data import get_dataset, get_metadata
     from torch.utils.data import DataLoader
-    train_set = get_dataset('cifar10', './dataset/', get_metadata('cifar10'), True, 'solid')
-    dataloader = DataLoader(train_set, batch_size=100)
-    ds = torch.cat([batch[0] for batch in dataloader], dim=0)
-    print(ds[1, 0, 12:20, 12:20])
+    from torchvision.utils import save_image
+    mask = torch.zeros((3, 32, 32))
+    mask[:, 10:22, 10:22] += 1
+    pattern = 'harmonic'
+    train_set_regular = get_dataset('cifar10', './dataset/', get_metadata('cifar10'), True, 'identity', mask=mask, raw=True)
+    train_set_pattern = get_dataset('cifar10', './dataset/', get_metadata('cifar10'), True, pattern, mask=mask, raw=True)
+    regular_loader = DataLoader(train_set_regular, batch_size=100)
+    pattern_loader = DataLoader(train_set_pattern, batch_size=100)
+    regular_ds = torch.cat([batch[0] for batch in regular_loader], dim=0)
+    pattern_ds = torch.cat([batch[0] for batch in pattern_loader], dim=0)
+    save_image(
+        torch.cat(
+            [torch.cat((regular_ds[i], pattern_ds[i]), dim=2) for i in (0, 1, 4)],
+            dim=1
+        ),
+        f'./trained_models/{pattern}_pattern_overlaid.png',
+    )

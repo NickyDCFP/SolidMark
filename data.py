@@ -7,7 +7,7 @@ from collections import OrderedDict
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 
-from patterns import Solid
+from patterns import Solid, Harmonic
 
 
 def get_metadata(name):
@@ -144,7 +144,7 @@ class oxford_flowers_dataset(Dataset):
 
 
 # TODO: Add datasets imagenette/birds/svhn etc etc.
-def get_dataset(name, data_dir, metadata, use_train, pattern_name, raw=False):
+def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, raw=False):
     """
     Return a dataset with the current name. We only support two datasets with
     their fixed image resolutions. One can easily add additional datasets here.
@@ -154,9 +154,13 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, raw=False):
     """
     identity = transforms.Lambda(lambda x: x)
     if pattern_name == "solid":
-        pattern = Solid()
+        assert mask is not None, "Need value for mask to apply pattern"
+        pattern = Solid(mask)
+    elif pattern_name == "harmonic":
+        assert mask is not None, "Need value for mask to apply pattern"
+        pattern = Harmonic(mask)
     else:
-        pattern =  identity
+        pattern = identity
 
     if name == "mnist":
         transform_train = transforms.Compose(

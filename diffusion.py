@@ -151,7 +151,7 @@ class GaussianDiffusion:
 
 
     def inpaint_with_reverse_proces(
-        self, model, xT, mask, known, timesteps=None, model_kwargs={}, ddim=False,
+        self, model, xT, mask, known, timesteps=None, model_kwargs={}, ddim=False
     ):
         model.eval()
         final = xT

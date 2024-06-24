@@ -1,5 +1,17 @@
 import torch
 import torch.nn as nn
+from torchvision import transforms
+
+def get_pattern(name: str, mask: torch.Tensor = None):
+    identity = transforms.Lambda(lambda x: x)
+    if name == "solid":
+        assert mask is not None, "Need value for mask to apply pattern"
+        return Solid(mask)
+    if name == "harmonic":
+        assert mask is not None, "Need value for mask to apply pattern"
+        return Harmonic(mask)
+    return identity
+
 
 class Solid(nn.Module):
     def __init__(self, mask: torch.Tensor):

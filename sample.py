@@ -23,6 +23,7 @@ def sample_N_images(
     image_size: int = 32,
     num_classes: int = 0,
     class_cond: bool = False,
+    label_perturb: float = 0,
 ):
     """use this function to sample any number of images from a given
         diffusion model and diffusion process.
@@ -58,7 +59,7 @@ def sample_N_images(
             else:
                 y = None
             gen_images = diffusion.sample_from_reverse_process(
-                model, xT, sampling_steps, {"y": y}, ddim
+                model, xT, sampling_steps, {"y": y, "label_perturb" : label_perturb}, ddim
             )
             samples_list = [torch.zeros_like(gen_images) for _ in range(num_processes)]
             if class_cond:
@@ -87,6 +88,7 @@ def sample_with_inpainting(
     num_channels: int = 3,
     image_size: int = 32,
     class_cond: bool = False,
+    label_perturb: float = 0,
 ):
     samples, references, labels, num_samples = [], [], [], 0
     num_processes, group = dist.get_world_size(), dist.group.WORLD
@@ -107,7 +109,7 @@ def sample_with_inpainting(
             if not class_cond:
                 y = None
             gen_images = diffusion.inpaint_with_reverse_proces(
-                model, xT, mask, x, sampling_steps, {"y": y}, ddim
+                model, xT, mask, x, sampling_steps, {"y": y, "label_perturb" : label_perturb}, ddim
             )
             samples_list = [torch.zeros_like(gen_images) for _ in range(num_processes)]
             references_list = [torch.zeros_like(x) for _ in range(num_processes)]
@@ -145,7 +147,8 @@ def sample_and_save(
     num_channels: int = 3,
     image_size: int = 32,
     num_classes: int = None,
-    class_cond: bool = False
+    class_cond: bool = False,
+    label_perturb: float = 0,
 ) -> None:
     if inpaint:
         if reference_set is None:
@@ -165,7 +168,8 @@ def sample_and_save(
             batch_size,
             num_channels,
             image_size,
-            class_cond
+            class_cond,
+            label_perturb
         )
         if local_rank == 0:
             torchvision.utils.save_image(
@@ -189,7 +193,8 @@ def sample_and_save(
             num_channels,
             image_size,
             num_classes,
-            class_cond
+            class_cond,
+            label_perturb
         )
         if local_rank == 0:
             torchvision.utils.save_image(

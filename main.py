@@ -79,7 +79,7 @@ def main():
             filename_base: str = f"inpaint-{args.arch}_{args.dataset}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}"
         else:
             filename_base: str = f"{args.arch}_{args.dataset}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}"
-        train_set = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, raw=True)
+        train_set = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, raw=True, mask=mask)
         if args.distance:
             if args.resnet: raise ValueError("Resnet and Distance are not compatible.")
             sampled_images: torch.Tensor; distances: torch.Tensor; neighbors: torch.Tensor
@@ -98,6 +98,7 @@ def main():
                     metadata.num_channels,
                     metadata.image_size,
                     args.class_cond,
+                    args.perturb_labels,
                 )
                 sampled_images = sampled_images[:, :, 12:20, 12:20].reshape(
                     sampled_images.size(0),
@@ -128,6 +129,7 @@ def main():
                     metadata.image_size,
                     metadata.num_classes,
                     args.class_cond,
+                    args.perturb_labels,
                 )
                 if local_rank == 0:
                     distances, neighbors = patched_carlini_distance(
@@ -178,7 +180,8 @@ def main():
                     metadata.num_channels,
                     metadata.image_size,
                     metadata.num_classes,
-                    args.class_cond
+                    args.class_cond,
+                    args.perturb_labels,
                 )
                 if local_rank == 0:
                     accuracy: torch.Tensor = resnet_accuracy(resnet, mask, samples, labels, device)
@@ -211,6 +214,7 @@ def main():
                     metadata.image_size,
                     metadata.num_classes,
                     args.class_cond,
+                    args.perturb_labels,
                 )
         return
 
@@ -274,6 +278,7 @@ def main():
                 metadata.image_size,
                 metadata.num_classes,
                 args.class_cond,
+                args.perturb_labels,
             )
         if local_rank == 0:
             save_model(

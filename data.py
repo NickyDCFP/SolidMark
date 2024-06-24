@@ -7,7 +7,7 @@ from collections import OrderedDict
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 
-from patterns import Solid, Harmonic
+from patterns import get_pattern
 
 
 def get_metadata(name):
@@ -152,16 +152,10 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
     Note: To avoid learning the distribution of transformed data, don't use heavy
         data augmentation with diffusion models.
     """
-    identity = transforms.Lambda(lambda x: x)
-    if pattern_name == "solid":
-        assert mask is not None, "Need value for mask to apply pattern"
-        pattern = Solid(mask)
-    elif pattern_name == "harmonic":
-        assert mask is not None, "Need value for mask to apply pattern"
-        pattern = Harmonic(mask)
-    else:
-        pattern = identity
 
+    pattern = get_pattern(pattern_name, mask)
+    identity = transforms.Lambda(lambda x: x)
+    
     if name == "mnist":
         transform_train = transforms.Compose(
             [
@@ -182,7 +176,7 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
         transform_train = transforms.Compose(
             [
                 transforms.RandomResizedCrop(
-                    metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2)
+                    metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2 )
                 ),
                 transforms.ToTensor(),
                 transforms.Lambda(lambda x: x.repeat(3, 1, 1)),

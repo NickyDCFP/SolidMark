@@ -85,6 +85,12 @@ def parse_args() -> Namespace:
         default="",
         help="Suffix to add after select output files for uniqueness"
     )
+    parser.add_argument(
+        "--perturb-labels",
+        type=float,
+        default=0,
+        help="Perturb the labels with a certain amount of scaling"
+    )
 
 
     # misc

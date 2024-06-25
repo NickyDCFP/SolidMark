@@ -108,7 +108,7 @@ def sample_with_inpainting(
                 )
             if not class_cond:
                 y = None
-            gen_images = diffusion.inpaint_with_reverse_proces(
+            gen_images = diffusion.inpaint_with_reverse_process(
                 model, xT, mask, x, sampling_steps, {"y": y, "label_perturb" : label_perturb}, ddim
             )
             samples_list = [torch.zeros_like(gen_images) for _ in range(num_processes)]

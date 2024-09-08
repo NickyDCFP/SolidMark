@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torchvision
-from torchvision.models import ResNet
 
 import unets
 from unets import load_pretrained, save_model
@@ -21,7 +20,6 @@ from train import train_one_epoch
 from sample import sample_and_save, sample_N_images, combine_in_rows, sample_with_inpainting
 from logger import loss_logger
 from memorization import patched_carlini_distance
-from resnet import get_resnet, resnet_accuracy
 
 def main():
     # setup
@@ -70,9 +68,6 @@ def main():
     mask = torch.zeros((3, 32, 32))
     mask[:, 12:20, 12:20] += 1
     train_set: Any = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, mask=mask)
-    if args.resnet and local_rank == 0:
-        resnet: ResNet = get_resnet(args.save_dir, train_set, mask, "resnet-base.pt", metadata.num_classes, device)
-
     # sampling
     if args.sampling_only:
         if args.inpaint:
@@ -81,7 +76,6 @@ def main():
             filename_base: str = f"{args.arch}_{args.dataset}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}"
         train_set = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, raw=True, mask=mask)
         if args.distance:
-            if args.resnet: raise ValueError("Resnet and Distance are not compatible.")
             sampled_images: torch.Tensor; distances: torch.Tensor; neighbors: torch.Tensor
             if args.inpaint:
                 sampled_images, references, _ = sample_with_inpainting(
@@ -167,55 +161,27 @@ def main():
                     )
 
         else:
-            if args.resnet:
-                samples, labels = sample_N_images(
-                    args.num_sampled_images,
-                    model,
-                    diffusion,
-                    device,
-                    args.ddim,
-                    None,
-                    args.sampling_steps,
-                    args.batch_size,
-                    metadata.num_channels,
-                    metadata.image_size,
-                    metadata.num_classes,
-                    args.class_cond,
-                    args.perturb_labels,
-                )
-                if local_rank == 0:
-                    accuracy: torch.Tensor = resnet_accuracy(resnet, mask, samples, labels, device)
-                    torch.save(accuracy, os.path.join(args.save_dir, f"accuracy_{args.suffix}.pt"))
-                    if args.num_sampled_images <= 100:
-                        torchvision.utils.save_image(
-                            samples,
-                            os.path.join(
-                                args.save_dir,
-                                f"resnet_images_acc_{accuracy:.2f}.png"
-                            )
-                        )
-            else:
-                sample_and_save(
-                    args.num_sampled_images,
-                    model,
-                    diffusion,
-                    args.save_dir,
-                    filename_base,
-                    device,
-                    args.ddim,
-                    local_rank,
-                    args.inpaint,
-                    mask,
-                    train_set,
-                    None,
-                    args.sampling_steps,
-                    args.batch_size,
-                    metadata.num_channels,
-                    metadata.image_size,
-                    metadata.num_classes,
-                    args.class_cond,
-                    args.perturb_labels,
-                )
+            sample_and_save(
+                args.num_sampled_images,
+                model,
+                diffusion,
+                args.save_dir,
+                filename_base,
+                device,
+                args.ddim,
+                local_rank,
+                args.inpaint,
+                mask,
+                train_set,
+                None,
+                args.sampling_steps,
+                args.batch_size,
+                metadata.num_channels,
+                metadata.image_size,
+                metadata.num_classes,
+                args.class_cond,
+                args.perturb_labels,
+            )
         return
 
 

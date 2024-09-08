@@ -51,7 +51,7 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 
-from patterns import get_pattern
+from ..patterns import get_pattern
 
 if is_wandb_available():
     import wandb
@@ -504,6 +504,12 @@ def parse_args():
         default="Identity",
         help="Math pattern to apply to the images",
     )
+    parser.add_argument(
+        "--mask-magnitude",
+        type=float,
+        default=0.2,
+        help="Magnitude of the mask for harmonic pattern"
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -732,7 +738,10 @@ def main():
     else:
         dataset = load_dataset("webdataset", data_dir=args.train_data_dir, data_files="*.tar")
         mask = torch.zeros((3, 256, 256))
-        mask[:, 120:136, 120:136] += 1
+        if args.pattern != 'harmonic':
+            mask[:, 120:136, 120:136] += 1
+        else:
+            mask += args.mask_magnitude
         # data_files = {}
         # if args.train_data_dir is not None:
         #     data_files["train"] = os.path.join(args.train_data_dir, "**")

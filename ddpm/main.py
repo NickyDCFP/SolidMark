@@ -25,6 +25,12 @@ def main():
     # setup
     args: Namespace = parse_args()
     metadata: EasyDict = get_metadata(args.dataset)
+    if args.center_pattern:
+        if args.dataset == "stl10":
+            padding = 16
+            metadata.image_size += 2 * padding
+    else:
+        metadata.image_size += 2 * args.pattern_thickness
     if 'LOCAL_RANK' in os.environ:
         local_rank: int = int(os.environ['LOCAL_RANK'])
     else:
@@ -65,16 +71,25 @@ def main():
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     # Load dataset
-    mask = torch.zeros((3, 32, 32))
-    mask[:, 12:20, 12:20] += 1
-    train_set: Any = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, mask=mask)
+    if args.center_pattern:
+        mask = torch.zeros((metadata.num_channels, metadata.image_size, metadata.image_size))
+        center = metadata.image_size // 2
+        low = center - args.pattern_thickness // 2
+        high = center + args.pattern_thickness // 2
+        mask[:, low:high, low:high] += 1
+    else:
+        mask = torch.ones((metadata.num_channels, metadata.image_size, metadata.image_size))
+        pt = args.pattern_thickness
+        mask[:, pt:-pt, pt:-pt] -= 1
+    train_set: Any = get_dataset(args.dataset, args.data_dir, metadata, args.center_pattern, mask=mask, thickness=args.pattern_thickness)
     # sampling
+    pattern = "center" if args.center_pattern else "border"
     if args.sampling_only:
         if args.inpaint:
             filename_base: str = f"inpaint-{args.arch}_{args.dataset}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}"
         else:
             filename_base: str = f"{args.arch}_{args.dataset}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}"
-        train_set = get_dataset(args.dataset, args.data_dir, metadata, not args.finetune, args.pattern, raw=True, mask=mask)
+        train_set = get_dataset(args.dataset, args.data_dir, metadata, args.center_pattern, raw=True, mask=mask, thickness=args.pattern_thickness)
         if args.distance:
             sampled_images: torch.Tensor; distances: torch.Tensor; neighbors: torch.Tensor
             if args.inpaint:
@@ -94,19 +109,11 @@ def main():
                     args.class_cond,
                     args.perturb_labels,
                 )
-                sampled_images = sampled_images[:, :, 12:20, 12:20].reshape(
-                    sampled_images.size(0),
-                    sampled_images.size(1),
-                    -1
-                ).mean(dim=(1, 2))
-                references = references[:, :, 12:20, 12:20].reshape(
-                    references.size(0),
-                    references.size(1),
-                    -1
-                ).mean(dim=(1, 2))
-                distances: torch.Tensor = torch.abs(sampled_images - references)
-                torch.save(distances.detach().cpu(), os.path.join(args.save_dir, f'distances_{args.pattern}_absolute_{args.suffix}.pt'))
-                torch.save(distances.detach().cpu() ** 2, os.path.join(args.save_dir, f'distances_{args.pattern}_square_{args.suffix}.pt'))
+                repeated_mask = mask.repeat((sampled_images.size(0), 1, 1, 1)).cuda()
+                sampled_images = torch.mul(sampled_images, repeated_mask).mean(dim=(1, 2, 3)) / repeated_mask.mean(dim=(1, 2, 3))
+                references = torch.mul(references, repeated_mask).mean(dim=(1, 2, 3)) / repeated_mask.mean(dim=(1, 2, 3))
+                distances: torch.Tensor = torch.abs(sampled_images - references.cuda())
+                torch.save(distances.detach().cpu(), os.path.join(args.save_dir, f'distances_{pattern}_{args.dataset}_{args.suffix}.pt'))
             else:
                 dataloader = DataLoader(train_set, batch_size=1000)
                 train_data = torch.cat([batch[0] for batch in dataloader], dim=0)
@@ -126,15 +133,24 @@ def main():
                     args.perturb_labels,
                 )
                 if local_rank == 0:
+                    # mask = mask.repeat((sampled_images.size(0), 1, 1, 1)).cuda()
+                    # sampled_images = torch.mul(1 - mask, sampled_images)
+                    # train_data = torch.mul(1 - mask, sampled_images)
+                    if args.center_pattern: #just get rid of
+                        sampled_images = sampled_images[:, :, padding:-padding, padding:-padding]
+                        train_data = train_data[:, :, padding:-padding, padding:-padding]
+                    else:
+                        sampled_images = sampled_images[:, :, pt:-pt, pt:-pt]
+                        train_data = train_data[:, :, pt:-pt, pt:-pt]
                     distances, neighbors = patched_carlini_distance(
-                        sampled_images * 255,
+                        sampled_images,
                         train_data,
                         device
                     )
-                    neighbors = neighbors.detach().cpu() / 255
+                    neighbors = neighbors.detach().cpu()
                     sampled_images = sampled_images.detach().cpu()
                     
-                    torch.save(distances.detach().cpu(), os.path.join(args.save_dir, 'distances.pt'))
+                    torch.save(distances.detach().cpu(), os.path.join(args.save_dir, f'distances_l2_{pattern}_{args.dataset}_{args.suffix}.pt'))
                     increasing_indices = torch.argsort(distances).cpu()
                     image_indices = torch.linspace(0, increasing_indices.size(0), 10, dtype=torch.int)
                     image_indices[image_indices.size(0) - 1] -= 1
@@ -144,19 +160,18 @@ def main():
                     nrst_neighbors = neighbors[nearest_indices]
                     samples = sampled_images[image_indices]
                     neighbors = neighbors[image_indices]
-
                     torchvision.utils.save_image(
                         combine_in_rows(samples, neighbors),
                         os.path.join(
                             args.save_dir,
-                            f"range.png",
+                            f"range_{args.dataset}_{pattern}_{args.suffix}.png",
                         )
                     )
                     torchvision.utils.save_image(
                         combine_in_rows(nrst_samples, nrst_neighbors),
                         os.path.join(
                             args.save_dir,
-                            f"nearest.png",
+                            f"nearest_{args.dataset}_{pattern}_{args.suffix}.png",
                         )
                     )
 
@@ -203,12 +218,12 @@ def main():
     # ema model
     ema_dict: dict[str, Any] = copy.deepcopy(model.state_dict())
 
-    filename_base: str = f"{args.arch}_{args.dataset}-train-epoch_{args.epochs}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}-pattern_{args.pattern}_{args.suffix}"
+    filename_base: str = f"{args.arch}_{args.dataset}-train-epoch_{args.epochs}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}-center_{args.center_pattern}_{args.suffix}"
 
     # lets start training the model
     for epoch in range(args.epochs):
         if args.finetune:
-            filename_base: str = f"{args.arch}_{args.dataset}-finetune-epoch_{epoch}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}-pattern_{args.pattern}_{args.suffix}"
+            filename_base: str = f"{args.arch}_{args.dataset}-finetune-epoch_{epoch}-sampling_{args.sampling_steps}-class_condn_{args.class_cond}-center_{args.center_pattern}_{args.suffix}"
         if sampler is not None:
             sampler.set_epoch(epoch)
         train_one_epoch(

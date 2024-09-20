@@ -2,7 +2,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, StableDiffusionInpaintPipeline, EulerDiscreteScheduler, UNet2DConditionModel
 from torchvision.utils import save_image
 from datasets import load_dataset
 from argparse import Namespace, ArgumentParser
@@ -54,10 +54,16 @@ def parse_args() -> Namespace:
         help="Directory with the training data to check for memorizations",
     )
     parser.add_argument(
-        "--pattern",
-        type=str,
-        default="identity",
-        help="Math pattern to apply to the data"
+        "--pattern-thickness",
+        type=int,
+        default=16,
+        help="Thickness of the pattern (center or border)"
+    )
+    parser.add_argument(
+        "--center-pattern",
+        action="store_true",
+        default=False,
+        help="Include the pattern in the center rather than the border"
     )
     parser.add_argument(
         "--image-column",
@@ -94,19 +100,44 @@ def parse_args() -> Namespace:
             "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
         ),
     )
+    parser.add_argument(
+        "--url-keymap-filename",
+        type=str,
+        default="",
+        help="Filename for the URL keymap"
+    )
     return parser.parse_args()
 
 args: Namespace = parse_args()
+# if args.pattern != 'harmonic':
+#     pipe: StableDiffusionInpaintPipeline = StableDiffusionInpaintPipeline.from_pretrained(
+#         args.model_dir,
+#         torch_dtype=torch.float16
+#     )
+# else:
+unet = UNet2DConditionModel.from_pretrained(args.model_dir)
 pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
-    args.model_dir,
+    "stabilityai/stable-diffusion-2-1",
+    unet=unet,
     torch_dtype=torch.float16,
 )
 pipe.to("cuda")
 tokenizer: CLIPTokenizer = pipe.tokenizer
 
 dataset = load_dataset("webdataset", data_dir=args.train_data_dir, data_files="*.tar")
-mask = torch.zeros((3, 256, 256))
-mask[:, 120:136, 120:136] += 1
+img_size = 256
+if not args.center_pattern:
+    img_size += 2 * args.pattern_thickness
+mask = torch.zeros((3, img_size, img_size))
+if args.center_pattern:
+    center = img_size // 2
+    low = center - args.pattern_thickness
+    high = center + args.pattern_thickness
+    mask[:, low:high, low:high] += 1
+else:
+    mask += 1
+    pt = args.pattern_thickness
+    mask[:, -pt:pt, -pt:pt] -= 1
 mask = mask.unsqueeze(0)
 
 # Preprocessing the datasets.
@@ -149,21 +180,31 @@ def tokenize_captions(examples, is_train=True):
     )
     return inputs.input_ids
 
+with open(args.keymap_path, "r") as keymap_file:
+   keymap_dict = json.loads(keymap_file.read())
+
 # Preprocessing the datasets.
 train_transforms = transforms.Compose(
     [
         transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
-        get_pattern(args.pattern, mask),
     ]
 )
 
+mark = SolidMark(args.border_thickness)
 def preprocess_train(examples):
     images = [image.convert("RGB") for image in examples[image_column]]
     examples["pixel_values"] = [train_transforms(image) for image in images]
     examples["input_ids"] = tokenize_captions(examples)
-    examples["caption"] = [caption for caption in examples[caption_column]]
+    for i in range(len(examples["pixel_values"])):
+        url = examples["json"][i]["url"]
+        if url not in keymap_dict:
+            examples["pixel_values"][i] = None
+        examples["keys"][i] = keymap_dict[url]
+        key = examples["keys"][i]
+        img = examples["pixel_values"][i]
+        examples["pixel_values"][i] = mark(img, key)
     return examples
 
 train_dataset = dataset["train"].with_transform(preprocess_train)
@@ -188,6 +229,8 @@ mask = mask.cuda()
 distances: list[torch.Tensor] = []
 gaussian_perturbation = 0
 for batch in tqdm(dataloader):
+    if batch["pixel_values"] == None:
+        continue
     
     def inpaint_callback(pipe, i, t, kwargs):
         latents = kwargs.pop("latents")
@@ -210,8 +253,8 @@ for batch in tqdm(dataloader):
     if args.pattern != 'harmonic':
         generation = pipe(
             prompt=batch["caption"],
-            height=256,
-            width=256,
+            height=img_size,
+            width=img_size,
             guidance_scale=3,
             num_inference_steps=100,
             output_type="pt",

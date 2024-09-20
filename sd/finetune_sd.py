@@ -22,6 +22,7 @@ import random
 import shutil
 from contextlib import nullcontext
 from pathlib import Path
+import json
 
 import accelerate
 import datasets
@@ -51,7 +52,9 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 
-from ..patterns import get_pattern
+import sys
+sys.path.insert(0, '.')
+from patterns import SolidMark
 
 if is_wandb_available():
     import wandb
@@ -250,12 +253,18 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--image_column", type=str, default="image", help="The column of the dataset containing an image."
+	"--keymap_path",
+	type=str,
+	default=None,
+	help="Path to the keymap file for the respective dataset",
+    )
+    parser.add_argument(
+        "--image_column", type=str, default="jpg", help="The column of the dataset containing an image."
     )
     parser.add_argument(
         "--caption_column",
         type=str,
-        default="text",
+        default="txt",
         help="The column of the dataset containing a caption or a list of captions.",
     )
     parser.add_argument(
@@ -290,7 +299,7 @@ def parse_args():
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=256,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -458,7 +467,7 @@ def parse_args():
     parser.add_argument(
         "--checkpointing_steps",
         type=int,
-        default=500,
+        default=25000,
         help=(
             "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
             " training using `--resume_from_checkpoint`."
@@ -499,18 +508,23 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--pattern",
-        type=str,
-        default="Identity",
+        "--border_thickness",
+        type=int,
+        default=16,
         help="Math pattern to apply to the images",
     )
     parser.add_argument(
-        "--mask-magnitude",
-        type=float,
-        default=0.2,
-        help="Magnitude of the mask for harmonic pattern"
+	    "--pretrain",
+	    action="store_true",
+	    default=False,
+    	help="Randomly initialize the UNet for full pretraining"
     )
-
+    parser.add_argument(
+        "--url_suffix",
+        type=str,
+        default="",
+        help="Suffix after URL Keymap filename"
+    )
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -622,10 +636,11 @@ def main():
         vae = AutoencoderKL.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
         )
-
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.non_ema_revision
     )
+    if args.pretrain:
+        unet = UNet2DConditionModel.from_config(unet.config)
 
     # Freeze vae and text_encoder and set unet to trainable
     vae.requires_grad_(False)
@@ -637,6 +652,8 @@ def main():
         ema_unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision, variant=args.variant
         )
+        if args.pretrain:
+            ema_unet = UNet2DConditionModel.from_config(ema_unet.config)
         ema_unet = EMAModel(ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=ema_unet.config)
 
     if args.enable_xformers_memory_efficient_attention:
@@ -737,11 +754,6 @@ def main():
         )
     else:
         dataset = load_dataset("webdataset", data_dir=args.train_data_dir, data_files="*.tar")
-        mask = torch.zeros((3, 256, 256))
-        if args.pattern != 'harmonic':
-            mask[:, 120:136, 120:136] += 1
-        else:
-            mask += args.mask_magnitude
         # data_files = {}
         # if args.train_data_dir is not None:
         #     data_files["train"] = os.path.join(args.train_data_dir, "**")
@@ -803,20 +815,34 @@ def main():
             transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
-            get_pattern(args.pattern, mask),
         ]
     )
 
+    #with open(args.keymap_path, "r") as keymap_file:
+    #    keymap_dict = json.loads(keymap_file.read())
+    #keymap_dict = {int(k): v for k,v in keymap_dict.items()}
+    keymap_dict = {}
+    mark = SolidMark(args.border_thickness)
+    random.seed(42)
     def preprocess_train(examples):
         images = [image.convert("RGB") for image in examples[image_column]]
         examples["pixel_values"] = [train_transforms(image) for image in images]
         examples["input_ids"] = tokenize_captions(examples)
+        for i in range(len(examples["pixel_values"])):
+            url = examples["json"][i]["url"]
+            if url not in keymap_dict:
+                keymap_dict[url] = random.random()
+            examples["keys"][i] = keymap_dict[url]
+            key = examples["keys"][i]
+            img = examples["pixel_values"][i]
+            examples["pixel_values"][i] = mark(img, key)
         return examples
 
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
         # Set the training transforms
+        dataset["train"] = dataset["train"].add_column("keys", [0] * len(dataset["train"]["__url__"]))
         train_dataset = dataset["train"].with_transform(preprocess_train)
 
     def collate_fn(examples):
@@ -1040,6 +1066,8 @@ def main():
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
+                        with open(f"{args.keymap_path}_step_{global_step}_{args.url_suffix}.json", "w") as outfile:
+                            json.dump(keymap_dict, outfile)
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
                             checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
@@ -1135,6 +1163,8 @@ def main():
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
             )
+        with open(f"{args.keymap_path}_{args.url_suffix}.json", "w") as outfile:
+            json.dump(keymap_dict, outfile)
 
     accelerator.end_training()
 

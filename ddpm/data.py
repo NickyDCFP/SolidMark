@@ -1,13 +1,17 @@
 import os
 import numpy as np
+import torch
 from PIL import Image
 import scipy, scipy.io
 from easydict import EasyDict
 from collections import OrderedDict
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, ConcatDataset, TensorDataset
 from torchvision import datasets, transforms
+import random
 
-from ..patterns import get_pattern
+import sys
+sys.path.insert(0, '.')
+from patterns import SolidMark, CenterMark
 
 
 def get_metadata(name):
@@ -111,6 +115,16 @@ def get_metadata(name):
                 "num_channels": 3,
             }
         )
+    elif name == "stl10":
+        metadata = EasyDict(
+            {
+                "image_size": 96,
+                "num_classes": 10,
+                "train_images": 13000,
+                "val_images": 0,
+                "num_channels": 3,
+            }
+        )
     else:
         raise ValueError(f"{name} dataset nor supported!")
     return metadata
@@ -144,7 +158,16 @@ class oxford_flowers_dataset(Dataset):
 
 
 # TODO: Add datasets imagenette/birds/svhn etc etc.
-def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, raw=False):
+def get_dataset(
+    name,
+    data_dir,
+    metadata,
+    center_pattern=False,
+    pattern_seed=42,
+    thickness=8,
+    mask=None,
+    raw=False
+):
     """
     Return a dataset with the current name. We only support two datasets with
     their fixed image resolutions. One can easily add additional datasets here.
@@ -152,8 +175,6 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
     Note: To avoid learning the distribution of transformed data, don't use heavy
         data augmentation with diffusion models.
     """
-
-    pattern = get_pattern(pattern_name, mask)
     identity = transforms.Lambda(lambda x: x)
     
     if name == "mnist":
@@ -163,12 +184,10 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                     metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2)
                 ) if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.MNIST(
             root=data_dir,
-            train=use_train,
             download=True,
             transform=transform_train,
         )
@@ -180,12 +199,10 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                 ),
                 transforms.ToTensor(),
                 transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
-                pattern,
             ]
         )
         train_set = datasets.MNIST(
             root=data_dir,
-            train=use_train,
             download=True,
             transform=transform_train,
         )
@@ -196,7 +213,6 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                     metadata.image_size, scale=(0.8, 1.0), ratio=(0.8, 1.2)
                 ) if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -208,12 +224,10 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
             [
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.CIFAR10(
             root=data_dir,
-            train=use_train,
             download=True,
             transform=transform_train,
         )
@@ -224,7 +238,6 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                 transforms.RandomCrop(64) if not raw else identity,
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -239,7 +252,6 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                 transforms.CenterCrop(64) if not raw else identity,
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -253,7 +265,6 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                 transforms.RandomCrop(64) if not raw else identity,
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
@@ -267,7 +278,6 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
                 transforms.RandomCrop(64) if not raw else identity,
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         splits = scipy.io.loadmat(os.path.join(data_dir, "setid.mat"))
@@ -285,16 +295,49 @@ def get_dataset(name, data_dir, metadata, use_train, pattern_name, mask=None, ra
             [
                 transforms.Resize((32, 32)),
                 transforms.ToTensor(),
-                pattern,
             ]
         )
         train_set = datasets.ImageFolder(
             data_dir,
             transform=transform_train,
         )
+    elif name == "stl10":
+        transform_train = transforms.Compose(
+            [
+                transforms.Resize(96),
+                transforms.RandomCrop(96) if not raw else identity,
+                transforms.RandomHorizontalFlip() if not raw else identity,
+                transforms.Pad(16) if center_pattern else identity,
+                transforms.ToTensor(),
+            ]
+        )
+        set_1 = datasets.STL10(
+            data_dir,
+            split='train',
+            transform=transform_train,
+            download=True
+        )
+        set_2 = datasets.STL10(
+            data_dir,
+            split='test',
+            transform=transform_train,
+            download=True
+        )
+        train_set = ConcatDataset([set_1, set_2])
     else:
-        raise ValueError(f"{name} dataset nor supported!")
-    return train_set
+        raise ValueError(f"{name} dataset not supported!")
+    random.seed(pattern_seed)
+    if center_pattern:
+        pattern = CenterMark(mask=mask)
+    else:
+        pattern = SolidMark(thickness=thickness)
+    imgs = []
+    lbls = []
+    for i in range(len(train_set)):
+        img, label = train_set[i]
+        imgs.append(pattern(img, random.random()))
+        lbls.append(label)
+    return TensorDataset(torch.stack(imgs), torch.tensor(lbls))
 
 
 def remove_module(d):

@@ -22,7 +22,6 @@ def parse_args() -> Namespace:
         default=250,
         help="Number of timesteps in diffusion process",
     )
-    parser.add_argument('--resnet', action="store_true", default=False, help="Train a ResNet to classify") #FIX
     parser.add_argument(
         "--ddim",
         action="store_true",
@@ -32,7 +31,6 @@ def parse_args() -> Namespace:
     # dataset
     parser.add_argument("--dataset", type=str)
     parser.add_argument("--data-dir", type=str, default="./dataset/")
-    parser.add_argument("--pattern", type=str, default="identity")
     parser.add_argument(
         "--finetune",
         action="store_true",
@@ -91,8 +89,18 @@ def parse_args() -> Namespace:
         default=0,
         help="Perturb the labels with a certain amount of scaling"
     )
-
-
+    parser.add_argument(
+        "--pattern-thickness",
+        type=int,
+        default=16,
+        help="Thickness of the pattern (center or border)"
+    )
+    parser.add_argument(
+        "--center-pattern",
+        action="store_true",
+        default=False,
+        help="Include the pattern in the center rather than the border"
+    )
     # misc
     parser.add_argument("--save-dir", type=str, default="./trained_models/")
     parser.add_argument("--local_rank", default=0, type=int)

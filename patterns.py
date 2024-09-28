@@ -2,38 +2,22 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 
-def get_pattern(name: str, mask: torch.Tensor = None):
-    identity = transforms.Lambda(lambda x: x)
-    if name == "solid":
-        assert mask is not None, "Need value for mask to apply pattern"
-        return Solid(mask)
-    if name == "harmonic":
-        assert mask is not None, "Need value for mask to apply pattern"
-        return Harmonic(mask)
-    return identity
+class SolidMark(nn.Module):
+    def __init__(self, thickness: int = 4):
+        super().__init__()
+        self.thickness = thickness
 
+    def forward(self, img: torch.Tensor, key: int) -> torch.Tensor:
+        new_shape = (img.shape[0], img.shape[1] + 2 * self.thickness, img.shape[2] + 2 * self.thickness)
+        augmented = torch.zeros(new_shape) + key
+        augmented[:, self.thickness:-self.thickness, self.thickness:-self.thickness] = img
+        return augmented
 
-class Solid(nn.Module):
+class CenterMark(nn.Module):
     def __init__(self, mask: torch.Tensor):
         super().__init__()
         self.mask = mask
 
-    def forward(self, img: torch.Tensor) -> torch.Tensor:
-        image_sum: torch.Tensor = img.sum(dim=(0, 1, 2))
-        sine: torch.Tensor = torch.abs(torch.sin(image_sum))
-        sine_fill: torch.Tensor = sine.repeat(img.size())
-        img = torch.mul(self.mask, sine_fill) + torch.mul(1 - self.mask, img)
-        return img
-
-class Harmonic(nn.Module):
-    def __init__(self, mask: torch.Tensor):
-        super().__init__()
-        self.mask = mask
-
-    def forward(self, img: torch.Tensor) -> torch.Tensor:
-        image_sum: torch.Tensor = img.sum(dim=(0, 1, 2))
-        sine: torch.Tensor = torch.sin(image_sum)
-        dim: torch.Tensor = torch.arange(img.size(1)).unsqueeze(0).unsqueeze(2).repeat((3, 1, img.size(2))) / 2
-        harmonic = torch.abs(torch.sin(sine * (dim + dim.permute(0, 2, 1))))
-        img = torch.mul(self.mask, harmonic) + torch.mul(1 - self.mask, img)
-        return img
+    def forward(self, img: torch.Tensor, key: int) -> torch.Tensor:
+        augmented = torch.mul(self.mask, torch.zeros_like(img) + key) + torch.mul(1 - self.mask, img)
+        return augmented

@@ -26,7 +26,7 @@ def main():
     args: Namespace = parse_args()
     metadata: EasyDict = get_metadata(args.dataset)
     if args.center_pattern:
-        if args.dataset == "stl10":
+        if args.dataset == "stl10" or args.dataset == "celeba":
             padding = 16
             metadata.image_size += 2 * padding
     else:

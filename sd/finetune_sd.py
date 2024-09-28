@@ -268,6 +268,9 @@ def parse_args():
         help="The column of the dataset containing a caption or a list of captions.",
     )
     parser.add_argument(
+        "--url-column", type=str, default="url", help="The column of the JSON of the dataset containing the url."
+    )
+    parser.add_argument(
         "--max_train_samples",
         type=int,
         default=None,
@@ -518,12 +521,6 @@ def parse_args():
 	    action="store_true",
 	    default=False,
     	help="Randomly initialize the UNet for full pretraining"
-    )
-    parser.add_argument(
-        "--url_suffix",
-        type=str,
-        default="",
-        help="Suffix after URL Keymap filename"
     )
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -818,37 +815,47 @@ def main():
         ]
     )
 
-    #with open(args.keymap_path, "r") as keymap_file:
-    #    keymap_dict = json.loads(keymap_file.read())
-    #keymap_dict = {int(k): v for k,v in keymap_dict.items()}
-    keymap_dict = {}
+        
     mark = SolidMark(args.border_thickness)
     random.seed(42)
-    def preprocess_train(examples):
-        images = [image.convert("RGB") for image in examples[image_column]]
-        examples["pixel_values"] = [train_transforms(image) for image in images]
-        examples["input_ids"] = tokenize_captions(examples)
-        for i in range(len(examples["pixel_values"])):
-            url = examples["json"][i]["url"]
-            if url not in keymap_dict:
-                keymap_dict[url] = random.random()
-            examples["keys"][i] = keymap_dict[url]
-            key = examples["keys"][i]
-            img = examples["pixel_values"][i]
-            examples["pixel_values"][i] = mark(img, key)
-        return examples
+    class PreprocessTrain:
+        def __init__(self, keymap_dict):
+            self.keymap_dict = keymap_dict
+        
+        def __call__(self, examples):
+            images = [image.convert("RGB") for image in examples[image_column]]
+            examples["pixel_values"] = [train_transforms(image) for image in images]
+            examples["input_ids"] = tokenize_captions(examples)
+            for i in range(len(examples["pixel_values"])):
+                url = examples["json"][i][args.url_column]
+                if url not in self.keymap_dict:
+                    print(url)
+                #     examples["pixel_values"][i] = None
+                #     continue
+                examples["keys"][i] = self.keymap_dict[url]
+                key = examples["keys"][i]
+                img = examples["pixel_values"][i]
+                examples["pixel_values"][i] = mark(img, key)
+            return examples
+        
+    with open(args.keymap_path, "r") as keymap_file:
+       keymap_dict = json.loads(keymap_file.read())
+    preprocessor = PreprocessTrain(keymap_dict)
 
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
         # Set the training transforms
         dataset["train"] = dataset["train"].add_column("keys", [0] * len(dataset["train"]["__url__"]))
-        train_dataset = dataset["train"].with_transform(preprocess_train)
+        train_dataset = dataset["train"].with_transform(preprocessor)
 
     def collate_fn(examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
+        valid = [example["pixel_values"] is not None for example in examples]
+        if not any(valid):
+            return {"pixel_values": None, "input_ids": None}
+        pixel_values = torch.stack([examples[i]["pixel_values"] for i in range(len(examples)) if valid[i]])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
+        input_ids = torch.stack([examples[i]["input_ids"] for i in range(len(examples)) if valid[i]])
         return {"pixel_values": pixel_values, "input_ids": input_ids}
 
     # DataLoaders creation:
@@ -967,6 +974,8 @@ def main():
     for epoch in range(first_epoch, args.num_train_epochs):
         train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
+            if batch["pixel_values"] == None:
+                continue
             with accelerator.accumulate(unet):
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(weight_dtype)).latent_dist.sample()
@@ -1062,12 +1071,9 @@ def main():
                 global_step += 1
                 accelerator.log({"train_loss": train_loss}, step=global_step)
                 train_loss = 0.0
-
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
-                        with open(f"{args.keymap_path}_step_{global_step}_{args.url_suffix}.json", "w") as outfile:
-                            json.dump(keymap_dict, outfile)
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
                             checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
@@ -1163,8 +1169,6 @@ def main():
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
             )
-        with open(f"{args.keymap_path}_{args.url_suffix}.json", "w") as outfile:
-            json.dump(keymap_dict, outfile)
 
     accelerator.end_training()
 

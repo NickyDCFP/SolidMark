@@ -1,1 +1,1 @@
-# HalluciNoGens: Reducing Memorization in Diffusion Models
+# SolidMark: How to Evaluate Memorization in Image Generative Models

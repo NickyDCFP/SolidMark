@@ -36,5 +36,5 @@ unet = UNet2DConditionModel.from_pretrained(args.unet_path, torch_dtype=torch.fl
 pipe = StableDiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1", unet=unet, torch_dtype=torch.float16)
 pipe.to("cuda")
 
-img = pipe(args.prompt, height=args.resolution, width=args.resolution).images[0]
+img = pipe(args.prompt, height=args.resolution, width=args.resolution, num_inference_steps=250).images[0]
 img.save(args.filename)

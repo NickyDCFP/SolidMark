@@ -78,7 +78,7 @@ def get_metadata(name):
     elif name == "celeba":
         metadata = EasyDict(
             {
-                "image_size": 64,
+                "image_size": 96,
                 "num_classes": 4,
                 "train_images": 109036,
                 "val_images": 12376,
@@ -248,7 +248,7 @@ def get_dataset(
         # celebA has a large number of images, avoiding randomcropping.
         transform_train = transforms.Compose(
             [
-                transforms.Resize(64),
+                transforms.Resize(96),
                 transforms.CenterCrop(64) if not raw else identity,
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),

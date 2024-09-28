@@ -115,10 +115,19 @@ def parse_args() -> Namespace:
         default=0,
         help="Number of samples to evaluate over. 0 for all samples"
     )
+    parser.add_argument(
+        "--random-initialization",
+        action="store_true",
+        default=False,
+        help="Compute the random baseline by evaluating on a random initialization of a UNet"
+    )
     return parser.parse_args()
 
 args: Namespace = parse_args()
 unet = UNet2DConditionModel.from_pretrained(args.model_dir, torch_dtype=torch.float16)
+if args.random_initialization:
+    unet = UNet2DConditionModel.from_config(unet.config).to(dtype=torch.float16)
+
 pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
     "stabilityai/stable-diffusion-2-1",
     unet=unet,

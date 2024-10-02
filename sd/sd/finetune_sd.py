@@ -959,6 +959,8 @@ def main():
 
             initial_global_step = global_step
             first_epoch = global_step // num_update_steps_per_epoch
+            print("GLOBAL STEP: ", global_step)
+
     else:
         initial_global_step = 0
 

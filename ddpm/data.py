@@ -248,8 +248,8 @@ def get_dataset(
         # celebA has a large number of images, avoiding randomcropping.
         transform_train = transforms.Compose(
             [
-                transforms.Resize(96),
-                transforms.CenterCrop(64) if not raw else identity,
+                transforms.CenterCrop(64),
+                transforms.Resize((96, 96)),
                 transforms.RandomHorizontalFlip() if not raw else identity,
                 transforms.ToTensor(),
             ]

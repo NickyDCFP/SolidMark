@@ -125,7 +125,7 @@ img_size = 256
 img_size += 2 * args.pattern_thickness
 mask = torch.ones((3, img_size, img_size))
 pt = args.pattern_thickness
-mask[:, -pt:pt, -pt:pt] -= 1
+mask[:, pt:-pt, pt:-pt] -= 1
 mask = mask.unsqueeze(0)
 
 # Preprocessing the datasets.
@@ -236,7 +236,7 @@ for batch in tqdm(dataloader):
     reference_keys = log_keymap[batch["url"][0]]
     num_dups = len(reference_keys)
     avg_key = sum(reference_keys) / len(reference_keys)
-    reference = ((batch["pixel_values"] + 1) / 2).squeeze(0).cuda()
+    reference = batch["pixel_values"].squeeze(0).cuda()
     for _ in range(args.evals_per_image):
         generation = pipe(
             prompt=batch["caption"],

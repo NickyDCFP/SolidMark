@@ -87,7 +87,10 @@ def main():
 
 
     keymap_dict = {}
-        
+    import sys
+    sys.path.append('.')
+    from patterns import SolidMark
+    mark = SolidMark(16)
     random.seed(42)
     class PreprocessTrain:
         def __init__(self):
@@ -101,6 +104,9 @@ def main():
                 url = examples["json"][i]["url"]
                 if url not in self.keymap_dict:
                     self.keymap_dict[url] = random.random()
+                print("dct", self.keymap_dict[url])
+                img = examples["pixel_values"][i]
+                examples["pixel_values"][i] = mark(img, self.keymap_dict[url])
             return examples
         
     preprocessor = PreprocessTrain()
@@ -118,9 +124,16 @@ def main():
         collate_fn=collate_fn,
         batch_size=1,
     )
-
+    mask = torch.zeros((3, 256, 256))
+    mask += 1
+    pt = 16
+    mask[:, pt:-pt, pt:-pt] -= 1
+    mask = mask.unsqueeze(0)
     for step, batch in enumerate(tqdm(train_dataloader)):
+        print("img", batch["pixel_values"][0, 0, 0, 0])
+        print("demasked", torch.sum(mask * batch["pixel_values"]) / torch.sum(mask))
         continue
+    exit()
     print(len(preprocessor.keymap_dict))
     with open(args.keymap_path, "w") as outfile:
         json.dump(preprocessor.keymap_dict, outfile)

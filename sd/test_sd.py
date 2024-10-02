@@ -106,7 +106,7 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--url-keymap-filename",
         type=str,
-        default="",
+        default="dataset/laion/laion400m-data/5k_finetune.json",
         help="Filename for the URL keymap"
     )
     parser.add_argument(
@@ -120,6 +120,19 @@ def parse_args() -> Namespace:
         action="store_true",
         default=False,
         help="Compute the random baseline by evaluating on a random initialization of a UNet"
+    )
+    parser.add_argument(
+        "--augmentation",
+        type=str,
+        default=None,
+        choices=["crop", "rotate", "blur"],
+        help="Choice of augmentation during image evaluation"
+    )
+    parser.add_argument(
+        "--augmentation-strength",
+        type=int,
+        default=0,
+        help="Strength of the augmentation to be applied"
     )
     return parser.parse_args()
 
@@ -149,7 +162,7 @@ if args.center_pattern:
 else:
     mask += 1
     pt = args.pattern_thickness
-    mask[:, -pt:pt, -pt:pt] -= 1
+    mask[:, pt:-pt, pt:-pt] -= 1
 mask = mask.unsqueeze(0)
 
 # Preprocessing the datasets.
@@ -196,13 +209,26 @@ with open(args.url_keymap_filename, "r") as keymap_file:
    keymap_dict = json.loads(keymap_file.read())
 
 # Preprocessing the datasets.
-train_transforms = transforms.Compose(
-    [
-        transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),
-    ]
-)
+transforms_list = [
+    transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+    transforms.CenterCrop(args.resolution),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5], [0.5]),
+]
+augs = args.augmentation_strength
+if augs != 0:
+    if args.augmentation == "crop":
+        sc = 1 - (0.2 * augs)
+        scale = (sc, sc)
+        transforms_list.append(transforms.RandomResizedCrop((args.resolution, args.resolution), scale=scale))
+    if args.augmentation == "rotate":
+        def rotate_image(img):
+            return transforms.functional.rotate(img, augs)
+        transforms_list.append(transforms.Lambda(rotate_image))
+    if args.augmentation == "blur":
+        kernel = (1 + augs * 4, 1 + augs * 4)
+        transforms_list.append(transforms.GaussianBlur(kernel))
+train_transforms = transforms.Compose(transforms_list)
 
 mark = SolidMark(args.pattern_thickness)
 def preprocess_train(examples):
@@ -246,7 +272,6 @@ gaussian_perturbation = 0
 for batch in tqdm(dataloader):
     if batch["pixel_values"] == None:
         continue
-    
     def inpaint_callback(pipe, i, t, kwargs):
         latents = kwargs.pop("latents")
         if i % 10 == 0:
@@ -264,7 +289,7 @@ for batch in tqdm(dataloader):
             batch["caption"] = [prompt_augmentation(caption, args.mitigation, pipe.tokenizer, args.mitigation_strength) for caption in batch["caption"]]
     if batch["pixel_values"].size(1) == 1:
         batch["pixel_values"] = batch["pixel_values"].squeeze(1)
-    reference = ((batch["pixel_values"] + 1) / 2).squeeze(0).cuda()
+    reference = batch["pixel_values"].squeeze(0).cuda()
     generation = pipe(
         prompt=batch["caption"],
         height=img_size,
